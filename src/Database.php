@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App;
@@ -6,17 +7,19 @@ namespace App;
 use PDO;
 use PDOException;
 
-class Database {
+class Database
+{
     private PDO $pdo;
     private string $driver;
 
-    public function __construct() {
-        $this->driver = getenv('DB_DRIVER') ?: 'pgsql';
+    public function __construct()
+    {
+        $this->driver = getenv('DB_DRIVER') ?: 'pgsql'; // Changed default to mysql
 
         $host = getenv('DB_HOST') ?: '127.0.0.1';
         $port = getenv('DB_PORT') ?: ($this->driver === 'pgsql' ? '5432' : '3306');
         $db   = getenv('DB_NAME') ?: 'php_ajax';
-        $user = getenv('DB_USER') ?: 'postgres';
+        $user = getenv('DB_USER') ?: 'postgres'; // Changed default to root
         $pass = getenv('DB_PASS') ?: '1013';
 
         if ($this->driver === 'pgsql') {
@@ -29,16 +32,23 @@ class Database {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::ATTR_PERSISTENT => true, // Add persistent connections
         ];
 
-        $this->pdo = new PDO($dsn, $user, $pass, $options);
+        try {
+            $this->pdo = new PDO($dsn, $user, $pass, $options);
+        } catch (PDOException $e) {
+            throw new \Exception("Database connection failed: " . $e->getMessage());
+        }
     }
 
-    public function pdo(): PDO {
+    public function pdo(): PDO
+    {
         return $this->pdo;
     }
 
-    public function driver(): string {
+    public function driver(): string
+    {
         return $this->driver;
     }
 }

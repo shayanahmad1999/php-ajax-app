@@ -13,16 +13,26 @@ declare(strict_types=1);
     input, textarea { width: 100%; padding: .6rem; margin: .4rem 0; border: 1px solid #ccc; border-radius: 8px; }
     button { padding: .6rem .9rem; border-radius: 8px; border: 1px solid #333; background: #333; color: #fff; cursor: pointer; }
     button.secondary { background:#fff; color:#333; margin-left:.5rem; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
     .row { display: flex; gap: .6rem; flex-wrap: wrap; }
     .row > * { flex: 1; }
     .muted { color: #666; font-size: .9rem; }
     .error { color: #b00020; }
+    .success { color: #008000; }
     .hidden { display: none; }
+    .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #333; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .search-container { margin-bottom: 1rem; }
+    .search-container input { margin-bottom: 0; }
   </style>
 </head>
 <body>
   <h1>Notes (AJAX + PHP + .env)</h1>
   <p class="muted">Create, list, update, and delete notes without refreshing the page.</p>
+
+  <div class="search-container">
+    <input type="text" id="search" placeholder="Search notes..." />
+  </div>
 
   <form id="create-form">
     <div class="row">
@@ -31,7 +41,12 @@ declare(strict_types=1);
     <textarea id="body" rows="4" placeholder="Body"></textarea>
     <button type="submit">Add Note</button>
     <span id="create-error" class="error"></span>
+    <span id="create-success" class="success"></span>
   </form>
+
+  <div id="loading" class="hidden">
+    <span class="loading"></span> Loading...
+  </div>
 
   <div id="notes"></div>
 
@@ -56,21 +71,50 @@ declare(strict_types=1);
 
 <script>
 const api = async (action, payload=null) => {
-  const opts = { headers: { 'Content-Type': 'application/json' } };
-  if (payload) { opts.method = 'POST'; opts.body = JSON.stringify(payload); }
-  return fetch(`api.php?action=${encodeURIComponent(action)}`, opts).then(r => r.json());
+  const loadingEl = document.getElementById('loading');
+  if (loadingEl) loadingEl.classList.remove('hidden');
+  
+  try {
+    const opts = { headers: { 'Content-Type': 'application/json' } };
+    if (payload) { opts.method = 'POST'; opts.body = JSON.stringify(payload); }
+    const response = await fetch(`api.php?action=${encodeURIComponent(action)}`, opts);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('API Error:', error);
+    return { ok: false, error: 'Network error occurred' };
+  } finally {
+    if (loadingEl) loadingEl.classList.add('hidden');
+  }
 };
 
 const el = (sel, root=document) => root.querySelector(sel);
 
-async function loadNotes() {
+async function loadNotes(searchTerm = '') {
   const res = await api('list');
   const wrap = el('#notes');
   wrap.innerHTML = '';
-  if (!res.ok) { wrap.innerHTML = '<p class="error">Failed to load.</p>'; return; }
+  if (!res.ok) {
+    wrap.innerHTML = '<p class="error">Failed to load notes: ' + (res.error || 'Unknown error') + '</p>';
+    return;
+  }
+
+  // Filter notes based on search term if provided
+  let notes = res.data;
+  if (searchTerm) {
+    notes = notes.filter(n =>
+      n.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      n.body.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }
+
+  if (notes.length === 0) {
+    wrap.innerHTML = '<p>No notes found.</p>';
+    return;
+  }
 
   const tpl = el('#note-template');
-  res.data.forEach(n => {
+  notes.forEach(n => {
     const card = tpl.content.cloneNode(true);
     const node = card.querySelector('.note');
     node.dataset.id = n.id;
@@ -94,17 +138,36 @@ async function loadNotes() {
     el('.save', node).onclick = async () => {
       const title = el('.edit-title', node).value.trim();
       const body = el('.edit-body', node).value.trim();
+      
+      // Frontend validation
+      if (!title) {
+        el('.error', node).textContent = 'Title is required';
+        return;
+      }
+      
       const res2 = await api('update', { id: n.id, title, body });
-      if (!res2.ok) { el('.error', node).textContent = res2.error || 'Update failed'; return; }
+      if (!res2.ok) {
+        el('.error', node).textContent = res2.error || 'Update failed';
+        return;
+      }
       n = res2.data;
       el('.title', node).textContent = n.title;
       el('.body', node).textContent = n.body;
       el('.edit', node).click(); // toggle back
+      el('.error', node).textContent = '';
+      el('#create-success').textContent = 'Note updated successfully';
+      setTimeout(() => el('#create-success').textContent = '', 3000);
     };
     el('.delete', node).onclick = async () => {
       if (!confirm('Delete this note?')) return;
       const res3 = await api('delete', { id: n.id });
-      if (res3.ok) node.remove();
+      if (res3.ok) {
+        node.remove();
+        el('#create-success').textContent = 'Note deleted successfully';
+        setTimeout(() => el('#create-success').textContent = '', 3000);
+      } else {
+        alert('Failed to delete note: ' + (res3.error || 'Unknown error'));
+      }
     };
 
     wrap.appendChild(card);
@@ -114,14 +177,52 @@ async function loadNotes() {
 el('#create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   el('#create-error').textContent = '';
+  el('#create-success').textContent = '';
+  
   const title = el('#title').value.trim();
   const body  = el('#body').value.trim();
-  const res = await api('create', { title, body });
-  if (!res.ok) { el('#create-error').textContent = res.error || 'Create failed'; return; }
-  el('#title').value = ''; el('#body').value = '';
-  await loadNotes();
+  
+  // Frontend validation
+  if (!title) {
+    el('#create-error').textContent = 'Title is required';
+    return;
+  }
+  
+  const submitBtn = el('#create-form button[type="submit"]');
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = 'Adding...';
+  submitBtn.disabled = true;
+  
+  try {
+    const res = await api('create', { title, body });
+    if (!res.ok) {
+      el('#create-error').textContent = res.error || 'Create failed';
+      return;
+    }
+    el('#title').value = '';
+    el('#body').value = '';
+    el('#create-success').textContent = 'Note added successfully';
+    await loadNotes();
+    setTimeout(() => el('#create-success').textContent = '', 3000);
+  } finally {
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
+  }
 });
 
+// Add search functionality
+let searchTimeout;
+el('#search').addEventListener('input', (e) => {
+  const searchTerm = e.target.value.trim();
+  
+  // Debounce search to avoid too many requests
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    loadNotes(searchTerm);
+  }, 300);
+});
+
+// Load notes on page load
 loadNotes();
 </script>
 </body>

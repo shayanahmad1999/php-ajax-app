@@ -4,8 +4,11 @@ A tiny CRUD app demonstrating:
 - PHP + PDO database access
 - `.env` configuration via `vlucas/phpdotenv`
 - Fetch-based AJAX (no frameworks)
+- Input validation and sanitization
+- Search functionality
+- Improved error handling
 
-**Default DB:** MySQL (works out of the box on Azure App Service).  
+**Default DB:** MySQL (works out of the box on Azure App Service).
 **Optional:** PostgreSQL (see notes below).
 
 ---
@@ -103,7 +106,7 @@ See links in the guide for details.
 
 ## 4) API
 
-- `GET  api.php?action=list` — list notes
+- `GET  api.php?action=list&search=term` — list notes (optional search)
 - `POST api.php?action=create` — body: `{ "title": "...", "body": "..." }`
 - `POST api.php?action=update` — body: `{ "id": 1, "title": "...", "body": "..." }`
 - `POST api.php?action=delete` — body: `{ "id": 1 }`
